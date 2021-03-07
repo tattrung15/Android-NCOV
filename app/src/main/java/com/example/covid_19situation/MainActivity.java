@@ -2,6 +2,8 @@ package com.example.covid_19situation;
 
 import android.content.Context;
 import android.graphics.Rect;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Bundle;
@@ -24,25 +26,24 @@ import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
 import com.squareup.moshi.JsonAdapter;
 import com.squareup.moshi.Moshi;
-import com.squareup.moshi.Types;
 
 import java.io.IOException;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 public class MainActivity extends AppCompatActivity {
 
     private final String BASE_URL = "https://apincov.herokuapp.com";
-
     Moshi moshi = new Moshi.Builder().build();
     List<Country> countries;
     int finalTotalConfirmed;
     int finalTotalDeaths;
     int finalTotalRecovered;
+    private SensorManager mSensorManager;
+    private Sensor mAccelerometer;
+    private ShakeDetector mShakeDetector;
 
     private Boolean isOnline() {
         ConnectivityManager cm =
@@ -58,6 +59,16 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        ListView listView = findViewById(R.id.lvShow);
+        EditText editText = findViewById(R.id.edtSearch);
+        TextView txtConfirmedGlobal = findViewById(R.id.txtConfirmedGlobal);
+        TextView txtDeathsGlobal = findViewById(R.id.txtDeathsGlobal);
+        TextView txtRecoveredGlobal = findViewById(R.id.txtRecoveredGlobal);
+
+        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        mAccelerometer = mSensorManager
+                .getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        mShakeDetector = new ShakeDetector();
 
         RequestQueue requestQueue = Volley.newRequestQueue(this);
 
@@ -66,47 +77,30 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(MainActivity.this, "Network Error!", Toast.LENGTH_LONG).show();
         } else {
             Toast.makeText(MainActivity.this, "Loading...", Toast.LENGTH_LONG).show();
-            final ListView listView = findViewById(R.id.lvShow);
-            final EditText editText = findViewById(R.id.edtSearch);
-            final TextView txtConfirmedGlobal = findViewById(R.id.txtConfirmedGlobal);
-            final TextView txtDeathsGlobal = findViewById(R.id.txtDeathsGlobal);
-            final TextView txtRecoveredGlobal = findViewById(R.id.txtRecoveredGlobal);
 
             StringRequest getAllCountries = new StringRequest(Request.Method.GET,
                     BASE_URL + "/countries", response -> {
-                try {
-                    JsonAdapter<Country[]> jsonAdapter = moshi.adapter(Country[].class);
-
-                    countries =Arrays.asList(Objects.requireNonNull(jsonAdapter.fromJson(response)));
-                    Log.e("TAG", String.valueOf(countries.size()));
-                    countries.sort(new SortByCountry());
-
-                    int totalConfirmed = 0, totalDeaths = 0, totalRecovered = 0;
-
-                    for (int i = 0; i < countries.size(); i++) {
-                        totalConfirmed += Integer.parseInt(countries.get(i).Confirmed);
-                        totalDeaths += Integer.parseInt(countries.get(i).Deaths);
-                        totalRecovered += Integer.parseInt(countries.get(i).Recovered);
-                    }
-
-                    finalTotalConfirmed = totalConfirmed;
-                    finalTotalDeaths = totalDeaths;
-                    finalTotalRecovered = totalRecovered;
-
-                    CountryAdapter countryAdapter = new CountryAdapter(MainActivity.this,
-                            R.layout.dong_thong_tin, countries);
-                    listView.setAdapter(countryAdapter);
-                    txtConfirmedGlobal.setText(String.valueOf(finalTotalConfirmed));
-                    txtDeathsGlobal.setText(String.valueOf(finalTotalDeaths));
-                    txtRecoveredGlobal.setText(String.valueOf(finalTotalRecovered));
-                } catch (IOException e) {
-                    Toast.makeText(MainActivity.this, e.getMessage(), Toast.LENGTH_LONG).show();
-                }
+                showInListView(response, listView, txtConfirmedGlobal, txtDeathsGlobal,
+                        txtRecoveredGlobal);
             }, error -> {
                 Toast.makeText(MainActivity.this, error.getMessage(), Toast.LENGTH_LONG).show();
             });
 
             requestQueue.add(getAllCountries);
+
+            mShakeDetector.setOnShakeListener(count -> {
+                editText.setText("");
+                StringRequest getAllCountriesAgain = new StringRequest(Request.Method.GET,
+                        BASE_URL + "/countries", response -> {
+                    Toast.makeText(MainActivity.this, "Reloading...", Toast.LENGTH_SHORT).show();
+                    showInListView(response, listView, txtConfirmedGlobal, txtDeathsGlobal,
+                            txtRecoveredGlobal);
+                }, error -> {
+                    Toast.makeText(MainActivity.this, error.getMessage(), Toast.LENGTH_LONG).show();
+                });
+
+                requestQueue.add(getAllCountriesAgain);
+            });
 
             editText.addTextChangedListener(new TextWatcher() {
                 @Override
@@ -161,6 +155,49 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
         }
+    }
+
+    public void showInListView(String response, ListView listView, TextView txtConfirmedGlobal,
+                               TextView txtDeathsGlobal, TextView txtRecoveredGlobal) {
+        try {
+            JsonAdapter<Country[]> jsonAdapter = moshi.adapter(Country[].class);
+
+            countries = Arrays.asList(Objects.requireNonNull(jsonAdapter.fromJson(response)));
+            countries.sort(new SortByCountry());
+
+            int totalConfirmed = 0, totalDeaths = 0, totalRecovered = 0;
+
+            for (int i = 0; i < countries.size(); i++) {
+                totalConfirmed += Integer.parseInt(countries.get(i).Confirmed);
+                totalDeaths += Integer.parseInt(countries.get(i).Deaths);
+                totalRecovered += Integer.parseInt(countries.get(i).Recovered);
+            }
+
+            finalTotalConfirmed = totalConfirmed;
+            finalTotalDeaths = totalDeaths;
+            finalTotalRecovered = totalRecovered;
+
+            CountryAdapter countryAdapter = new CountryAdapter(MainActivity.this,
+                    R.layout.dong_thong_tin, countries);
+            listView.setAdapter(countryAdapter);
+            txtConfirmedGlobal.setText(String.valueOf(finalTotalConfirmed));
+            txtDeathsGlobal.setText(String.valueOf(finalTotalDeaths));
+            txtRecoveredGlobal.setText(String.valueOf(finalTotalRecovered));
+        } catch (IOException e) {
+            Toast.makeText(MainActivity.this, e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        mSensorManager.registerListener(mShakeDetector, mAccelerometer, SensorManager.SENSOR_DELAY_UI);
+    }
+
+    @Override
+    public void onPause() {
+        mSensorManager.unregisterListener(mShakeDetector);
+        super.onPause();
     }
 
     @Override
